@@ -34,6 +34,10 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
+        # This generates the missing 'android' folder on the fly
+      - name: Create Platform Files
+        run: flutter create .
+
       # 5. Build the production-ready APK
       - name: Build APK
         run: flutter build apk --release
