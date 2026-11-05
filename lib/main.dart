@@ -6,7 +6,17 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:external_app_launcher/external_app_launcher.dart';
 
-void main() => runApp(MaterialApp(home: RizzieUniversalApp(), debugShowCheckedModeBanner: false));
+void main() => runApp(MaterialApp(
+  home: RizzieUniversalApp(), 
+  debugShowCheckedModeBanner: false,
+  theme: ThemeData.dark().copyWith(
+    scaffoldBackgroundColor: const Color(0xFF121212),
+    colorScheme: const ColorScheme.dark(
+      primary: Color(0xFF6C63FF),
+      secondary: Color(0xFF03DAC6),
+    ),
+  ),
+));
 
 class RizzieUniversalApp extends StatefulWidget {
   @override
@@ -15,17 +25,16 @@ class RizzieUniversalApp extends StatefulWidget {
 
 class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
   stt.SpeechToText _speech = stt.SpeechToText();
-  AudioPlayer _audioPlayer = AudioPlayer(); // Replaced FlutterTts with AudioPlayer
+  AudioPlayer _audioPlayer = AudioPlayer();
   
   bool _isListening = false;
-  String _lastWords = "";
+  String _appState = "Ready"; // Ready, Listening, Thinking, Speaking
+  String _lastWords = "Tap the mic to wake Rizzie...";
   
-  // Dynamic Speaker State
   String _activeSpeaker = "Rishikesh";
   String _activeRelation = "Admin";
   final String _familyPassword = "rizzie2026family";
 
-  // Quick lookup map for common Android apps
   final Map<String, String> appPackages = {
     "whatsapp": "com.whatsapp",
     "spotify": "com.spotify.music",
@@ -37,32 +46,51 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
   @override
   void initState() {
     super.initState();
-    _speech.initialize();
+    _initSpeech();
+  }
+
+  void _initSpeech() async {
+    await _speech.initialize(
+      onError: (val) => setState(() {
+        _appState = "Mic Error: Check Permissions";
+        _isListening = false;
+      }),
+    );
   }
 
   void _startListening() async {
     bool available = await _speech.initialize();
     if (available) {
-      setState(() => _isListening = true);
+      setState(() {
+        _isListening = true;
+        _appState = "Listening...";
+        _lastWords = "";
+      });
       _speech.listen(onResult: (val) {
         setState(() => _lastWords = val.recognizedWords);
         if (val.finalResult) {
           _speech.stop();
-          setState(() => _isListening = false);
+          setState(() {
+            _isListening = false;
+            _appState = "Thinking...";
+          });
           if (_lastWords.isNotEmpty) {
             _sendToRizzieCore(_lastWords);
           }
         }
       });
+    } else {
+      setState(() {
+        _appState = "Microphone Denied";
+        _isListening = false;
+      });
     }
   }
 
   Future<void> _sendToRizzieCore(String query) async {
-    // Make sure this matches your live Render URL exactly
     final String backendUrl = "https://rizzie-core.onrender.com"; 
     
     try {
-      // 1. Get AI Logic from Groq/Gemini
       final response = await http.post(
         Uri.parse("$backendUrl/rizzie"),
         headers: {"Content-Type": "application/json"},
@@ -79,8 +107,9 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
         String action = data["action"] ?? "NONE";
         String target = data["target"] ?? "";
 
-        // 2. Play Sarvam AI Voice
+        // 1. Play Audio Response
         if (spokenReply.isNotEmpty) {
+          setState(() => _appState = "Speaking...");
           final audioResponse = await http.post(
             Uri.parse("$backendUrl/speak"),
             headers: {"Content-Type": "application/json"},
@@ -88,89 +117,178 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
           );
 
           if (audioResponse.statusCode == 200) {
-            // Play the .wav bytes directly from the server memory!
             await _audioPlayer.play(BytesSource(audioResponse.bodyBytes));
+            _audioPlayer.onPlayerComplete.listen((event) {
+              setState(() => _appState = "Ready");
+            });
           } else {
-            print("Sarvam Audio Error: ${audioResponse.body}");
+             setState(() => _appState = "Voice Engine Error");
           }
+        } else {
+           setState(() => _appState = "Ready");
         }
 
-        // 3. Execute On-Device Actions
+        // 2. Action Routing (Including new WhatsApp logic)
         if (action == "PLAY_YOUTUBE") {
           final ytUrl = Uri.parse("https://www.youtube.com/results?search_query=$target");
           await launchUrl(ytUrl, mode: LaunchMode.externalApplication);
         } 
         else if (action == "OPEN_APP") {
-          // Clean the target string and find the package name
           String cleanTarget = target.toLowerCase().trim();
           String? packageName = appPackages[cleanTarget];
-          
           if (packageName != null) {
             await LaunchApp.openApp(androidPackageName: packageName);
+          }
+        }
+        else if (action == "SEND_WHATSAPP") {
+          final whatsappUrl = Uri.parse("whatsapp://send?text=Hey $target");
+          if (await canLaunchUrl(whatsappUrl)) {
+            await launchUrl(whatsappUrl);
           } else {
-            print("App package not mapped for: $target");
+            await LaunchApp.openApp(androidPackageName: "com.whatsapp");
           }
         }
       }
     } catch (e) {
-      print("Network Error: $e");
+      setState(() => _appState = "Server Connection Failed");
     }
+  }
+
+  Widget _buildSpeakerCard(String name, String relation) {
+    bool isSelected = _activeSpeaker == name;
+    return GestureDetector(
+      onTap: () => setState(() {
+        _activeSpeaker = name;
+        _activeRelation = relation;
+      }),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF6C63FF).withOpacity(0.2) : const Color(0xFF1E1E1E),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF6C63FF) : Colors.transparent,
+            width: 2,
+          ),
+          boxShadow: isSelected ? [
+            BoxShadow(color: const Color(0xFF6C63FF).withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 2))
+          ] : [],
+        ),
+        child: Text(
+          name,
+          style: TextStyle(
+            color: isSelected ? const Color(0xFF6C63FF) : Colors.white70,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            fontSize: 15,
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Rizzie - Family AI"),
-        backgroundColor: Colors.indigo,
-        foregroundColor: Colors.white,
+        title: const Text("Rizzie", style: TextStyle(fontWeight: FontWeight.w600, letterSpacing: 1.2)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text("Who is speaking right now?", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            SizedBox(height: 10),
-            
-            // Universal Speaker Selector Chips
-            Wrap(
-              spacing: 10.0,
-              children: [
-                ChoiceChip(
-                  label: Text("Rishikesh"),
-                  selected: _activeSpeaker == "Rishikesh",
-                  onSelected: (selected) => setState(() { _activeSpeaker = "Rishikesh"; _activeRelation = "Admin"; }),
-                ),
-                ChoiceChip(
-                  label: Text("Mom"),
-                  selected: _activeSpeaker == "Mom",
-                  onSelected: (selected) => setState(() { _activeSpeaker = "Mom"; _activeRelation = "Mother"; }),
-                ),
-                ChoiceChip(
-                  label: Text("Sister"),
-                  selected: _activeSpeaker == "Sister",
-                  onSelected: (selected) => setState(() { _activeSpeaker = "Sister"; _activeRelation = "Sister"; }),
-                ),
-              ],
-            ),
-            SizedBox(height: 60),
-            
-            Text(_isListening ? "Listening..." : "Tap mic to talk", style: TextStyle(fontSize: 18, color: Colors.grey[700])),
-            SizedBox(height: 20),
-            
-            GestureDetector(
-              onTap: _startListening,
-              child: CircleAvatar(
-                radius: 45,
-                backgroundColor: _isListening ? Colors.redAccent : Colors.indigo,
-                child: Icon(_isListening ? Icons.mic : Icons.mic_none, size: 40, color: Colors.white),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 10),
+              const Text(
+                "Active Profile",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey, fontSize: 13, letterSpacing: 1.5, uppercase: true),
               ),
-            ),
-            SizedBox(height: 40),
-            
-            Text("Last Heard:\n\"$_lastWords\"", textAlign: TextAlign.center, style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey[600])),
-          ],
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildSpeakerCard("Rishikesh", "Admin"),
+                  const SizedBox(width: 10),
+                  _buildSpeakerCard("Mom", "Mother"),
+                  const SizedBox(width: 10),
+                  _buildSpeakerCard("Sister", "Sister"),
+                ],
+              ),
+              
+              const Spacer(),
+              
+              // Chat Bubble
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  _lastWords,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 16, 
+                    height: 1.5,
+                    color: _lastWords.contains("mic to wake") ? Colors.grey : Colors.white,
+                    fontStyle: _lastWords.contains("mic to wake") ? FontStyle.italic : FontStyle.normal,
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 40),
+              
+              Text(
+                _appState.toUpperCase(),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _appState.contains("Error") || _appState.contains("Failed") || _appState.contains("Denied") 
+                      ? Colors.redAccent 
+                      : const Color(0xFF03DAC6),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2.0,
+                ),
+              ),
+              
+              const SizedBox(height: 20),
+              
+              // Mic Button
+              Center(
+                child: GestureDetector(
+                  onTap: _isListening ? null : _startListening,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    height: _isListening ? 100 : 80,
+                    width: _isListening ? 100 : 80,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _isListening ? Colors.redAccent.withOpacity(0.8) : const Color(0xFF6C63FF),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _isListening ? Colors.redAccent.withOpacity(0.4) : const Color(0xFF6C63FF).withOpacity(0.4),
+                          blurRadius: _isListening ? 25 : 15,
+                          spreadRadius: _isListening ? 5 : 2,
+                        )
+                      ]
+                    ),
+                    child: Icon(
+                      _isListening ? Icons.mic : Icons.mic_none,
+                      color: Colors.white,
+                      size: _isListening ? 40 : 32,
+                    ),
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 40),
+            ],
+          ),
         ),
       ),
     );
