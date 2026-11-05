@@ -204,9 +204,9 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
             children: [
               const SizedBox(height: 10),
               const Text(
-                "Active Profile",
+                "ACTIVE PROFILE",
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey, fontSize: 13, letterSpacing: 1.5, uppercase: true),
+                style: TextStyle(color: Colors.grey, fontSize: 13, letterSpacing: 1.5),
               ),
               const SizedBox(height: 16),
               Row(
