@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:external_app_launcher/external_app_launcher.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:quick_actions/quick_actions.dart';
 
 void main() => runApp(MaterialApp(
   home: RizzieUniversalApp(), 
@@ -27,13 +28,15 @@ class RizzieUniversalApp extends StatefulWidget {
 class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
   stt.SpeechToText _speech = stt.SpeechToText();
   AudioPlayer _audioPlayer = AudioPlayer();
+  final QuickActions quickActions = const QuickActions();
   
   bool _isListening = false;
   String _appState = "Checking Permissions..."; 
   String _lastWords = "Tap the mic to wake Rizzie...";
   
-  String _activeSpeaker = "Rishikesh";
-  String _activeRelation = "Admin";
+  String _activeSpeaker = "Auto"; // Default to AI Inference
+  String _activeRelation = "Unknown";
+  String _listenLocale = "en_IN"; // Default to Tanglish (Indian English)
   final String _familyPassword = "rizzie2026family";
 
   final Map<String, String> appPackages = {
@@ -48,33 +51,48 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
   void initState() {
     super.initState();
     _requestPermissions();
+    _setupShortcuts();
+  }
+
+  void _setupShortcuts() {
+    quickActions.initialize((String shortcutType) {
+      if (shortcutType == 'action_listen') {
+        _startListening();
+      }
+    });
+    quickActions.setShortcutItems(<ShortcutItem>[
+      const ShortcutItem(
+        type: 'action_listen',
+        localizedTitle: 'Wake Rizzie',
+        icon: 'ic_launcher'
+      ),
+    ]);
   }
 
   Future<void> _requestPermissions() async {
     Map<Permission, PermissionStatus> statuses = await [
       Permission.microphone,
+      Permission.phone,
     ].request();
 
     if (statuses[Permission.microphone]!.isGranted) {
       _initSpeech();
     } else {
-      setState(() {
-        _appState = "Microphone Denied";
-      });
+      setState(() => _appState = "Microphone Denied");
     }
   }
 
   void _initSpeech() async {
     bool available = await _speech.initialize(
       onError: (val) => setState(() {
-        _appState = "Mic Error: Check Permissions";
+        _appState = "Mic Error";
         _isListening = false;
       }),
     );
     if (available) {
-      setState(() {
-        _appState = "Ready";
-      });
+      setState(() => _appState = "Ready");
+      // Optional: Auto-listen on app open
+      // _startListening(); 
     }
   }
 
@@ -86,23 +104,21 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
         _appState = "Listening...";
         _lastWords = "";
       });
-      _speech.listen(onResult: (val) {
-        setState(() => _lastWords = val.recognizedWords);
-        if (val.finalResult) {
-          _speech.stop();
-          setState(() {
-            _isListening = false;
-            _appState = "Thinking...";
-          });
-          if (_lastWords.isNotEmpty) {
-            _sendToRizzieCore(_lastWords);
+      // localeId forces the recognizer to expect specific languages
+      _speech.listen(
+        localeId: _listenLocale,
+        onResult: (val) {
+          setState(() => _lastWords = val.recognizedWords);
+          if (val.finalResult) {
+            _speech.stop();
+            setState(() {
+              _isListening = false;
+              _appState = "Thinking...";
+            });
+            if (_lastWords.isNotEmpty) {
+              _sendToRizzieCore(_lastWords);
+            }
           }
-        }
-      });
-    } else {
-      setState(() {
-        _appState = "Microphone Denied";
-        _isListening = false;
       });
     }
   }
@@ -116,7 +132,7 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
           "password": _familyPassword,
-          "speaker": "$_activeSpeaker ($_activeRelation)", 
+          "speaker": _activeSpeaker == "Auto" ? "Auto" : "$_activeSpeaker ($_activeRelation)", 
           "query": query,
         }),
       );
@@ -141,14 +157,12 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
             _audioPlayer.onPlayerComplete.listen((event) {
               setState(() => _appState = "Ready");
             });
-          } else {
-             setState(() => _appState = "Voice Engine Error");
           }
         } else {
            setState(() => _appState = "Ready");
         }
 
-        // 2. Action Routing
+        // 2. Action Routing Execution
         if (action == "PLAY_YOUTUBE") {
           final ytUrl = Uri.parse("https://www.youtube.com/results?search_query=$target");
           await launchUrl(ytUrl, mode: LaunchMode.externalApplication);
@@ -168,6 +182,20 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
             await LaunchApp.openApp(androidPackageName: "com.whatsapp");
           }
         }
+        else if (action == "MAKE_CALL") {
+          // Removes spaces/dashes and dials
+          final callUrl = Uri.parse("tel:${target.replaceAll(RegExp(r'[^0-9+]'), '')}");
+          if (await canLaunchUrl(callUrl)) {
+            await launchUrl(callUrl);
+          }
+        }
+        else if (action == "NAVIGATE_MAPS") {
+          // Triggers native Google Maps navigation
+          final mapUrl = Uri.parse("google.navigation:q=$target");
+          if (await canLaunchUrl(mapUrl)) {
+            await launchUrl(mapUrl, mode: LaunchMode.externalApplication);
+          }
+        }
       }
     } catch (e) {
       setState(() => _appState = "Server Connection Failed");
@@ -183,7 +211,7 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
       }),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: isSelected ? const Color(0xFF6C63FF).withOpacity(0.2) : const Color(0xFF1E1E1E),
           borderRadius: BorderRadius.circular(16),
@@ -191,16 +219,13 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
             color: isSelected ? const Color(0xFF6C63FF) : Colors.transparent,
             width: 2,
           ),
-          boxShadow: isSelected ? [
-            BoxShadow(color: const Color(0xFF6C63FF).withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 2))
-          ] : [],
         ),
         child: Text(
           name,
           style: TextStyle(
             color: isSelected ? const Color(0xFF6C63FF) : Colors.white70,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            fontSize: 15,
+            fontSize: 13,
           ),
         ),
       ),
@@ -215,6 +240,20 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
+        actions: [
+          // Tanglish / Tamil Toggle
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _listenLocale = _listenLocale == "en_IN" ? "ta_IN" : "en_IN";
+              });
+            },
+            child: Text(
+              _listenLocale == "en_IN" ? "TANGLISH" : "TAMIL",
+              style: const TextStyle(color: Color(0xFF03DAC6), fontWeight: FontWeight.bold),
+            ),
+          )
+        ],
       ),
       body: SafeArea(
         child: Padding(
@@ -226,23 +265,27 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
               const Text(
                 "ACTIVE PROFILE",
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey, fontSize: 13, letterSpacing: 1.5),
+                style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5),
               ),
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _buildSpeakerCard("Rishikesh", "Admin"),
-                  const SizedBox(width: 10),
-                  _buildSpeakerCard("Mom", "Mother"),
-                  const SizedBox(width: 10),
-                  _buildSpeakerCard("Sister", "Sister"),
-                ],
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _buildSpeakerCard("Auto", "Inference"),
+                    const SizedBox(width: 8),
+                    _buildSpeakerCard("Rishikesh", "Admin"),
+                    const SizedBox(width: 8),
+                    _buildSpeakerCard("Mom", "Mother"),
+                    const SizedBox(width: 8),
+                    _buildSpeakerCard("Sister", "Sister"),
+                  ],
+                ),
               ),
               
               const Spacer(),
               
-              // Chat Bubble
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -278,7 +321,6 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
               
               const SizedBox(height: 20),
               
-              // Mic Button
               Center(
                 child: GestureDetector(
                   onTap: _isListening ? null : _startListening,
