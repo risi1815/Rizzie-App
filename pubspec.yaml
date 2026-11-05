@@ -40,6 +40,7 @@ dependencies:
   audioplayers: any
   external_app_launcher: any
   permission_handler: 11.3.1
+  quick_actions: any
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
