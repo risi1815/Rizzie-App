@@ -5,6 +5,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:external_app_launcher/external_app_launcher.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() => runApp(MaterialApp(
   home: RizzieUniversalApp(), 
@@ -28,7 +29,7 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
   AudioPlayer _audioPlayer = AudioPlayer();
   
   bool _isListening = false;
-  String _appState = "Ready"; // Ready, Listening, Thinking, Speaking
+  String _appState = "Checking Permissions..."; 
   String _lastWords = "Tap the mic to wake Rizzie...";
   
   String _activeSpeaker = "Rishikesh";
@@ -46,16 +47,35 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
   @override
   void initState() {
     super.initState();
-    _initSpeech();
+    _requestPermissions();
+  }
+
+  Future<void> _requestPermissions() async {
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.microphone,
+    ].request();
+
+    if (statuses[Permission.microphone]!.isGranted) {
+      _initSpeech();
+    } else {
+      setState(() {
+        _appState = "Microphone Denied";
+      });
+    }
   }
 
   void _initSpeech() async {
-    await _speech.initialize(
+    bool available = await _speech.initialize(
       onError: (val) => setState(() {
         _appState = "Mic Error: Check Permissions";
         _isListening = false;
       }),
     );
+    if (available) {
+      setState(() {
+        _appState = "Ready";
+      });
+    }
   }
 
   void _startListening() async {
@@ -128,7 +148,7 @@ class _RizzieUniversalAppState extends State<RizzieUniversalApp> {
            setState(() => _appState = "Ready");
         }
 
-        // 2. Action Routing (Including new WhatsApp logic)
+        // 2. Action Routing
         if (action == "PLAY_YOUTUBE") {
           final ytUrl = Uri.parse("https://www.youtube.com/results?search_query=$target");
           await launchUrl(ytUrl, mode: LaunchMode.externalApplication);
